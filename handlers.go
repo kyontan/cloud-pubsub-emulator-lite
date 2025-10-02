@@ -12,13 +12,14 @@ import (
 )
 
 var (
-	listTopicsRegex       = regexp.MustCompile(`^/v1/projects/([^/]+)/topics$`)
-	listSubscriptionsRegex = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions$`)
-	topicPathRegex        = regexp.MustCompile(`^/v1/projects/([^/]+)/topics/([^/]+)$`)
-	topicPublishRegex     = regexp.MustCompile(`^/v1/projects/([^/]+)/topics/([^/]+):publish$`)
-	subscriptionPathRegex = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+)$`)
-	subscriptionPullRegex = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+):pull$`)
-	subscriptionAckRegex  = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+):acknowledge$`)
+	listTopicsRegex            = regexp.MustCompile(`^/v1/projects/([^/]+)/topics$`)
+	listSubscriptionsRegex     = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions$`)
+	topicPathRegex             = regexp.MustCompile(`^/v1/projects/([^/]+)/topics/([^/]+)$`)
+	topicPublishRegex          = regexp.MustCompile(`^/v1/projects/([^/]+)/topics/([^/]+):publish$`)
+	subscriptionPathRegex      = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+)$`)
+	subscriptionPullRegex      = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+):pull$`)
+	subscriptionAckRegex       = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+):acknowledge$`)
+	subscriptionModifyAckRegex = regexp.MustCompile(`^/v1/projects/([^/]+)/subscriptions/([^/]+):modifyAckDeadline$`)
 
 	logger *slog.Logger
 )
@@ -78,6 +79,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if r.Method == http.MethodPost {
 			s.handleAcknowledge(w, r, subscriptionName)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// Subscription modifyAckDeadline (check before subscription operations)
+	if matches := subscriptionModifyAckRegex.FindStringSubmatch(path); matches != nil {
+		project, subscription := matches[1], matches[2]
+		subscriptionName := fmt.Sprintf("projects/%s/subscriptions/%s", project, subscription)
+
+		if r.Method == http.MethodPost {
+			s.handleModifyAckDeadline(w, r, subscriptionName)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -384,6 +398,42 @@ func (s *Server) handleAcknowledge(w http.ResponseWriter, r *http.Request, subsc
 		"operation", "acknowledge",
 		"subscription", subscriptionName,
 		"ack_id_count", len(req.AckIDs))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}"))
+}
+
+func (s *Server) handleModifyAckDeadline(w http.ResponseWriter, r *http.Request, subscriptionName string) {
+	var req ModifyAckDeadlineRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("invalid request body",
+			"operation", "modifyAckDeadline",
+			"subscription", subscriptionName,
+			"error", err.Error())
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	err := s.storage.ModifyAckDeadline(subscriptionName, req.AckIDs, req.AckDeadlineSeconds)
+	if err != nil {
+		logger.Error("failed to modify ack deadline",
+			"operation", "modifyAckDeadline",
+			"subscription", subscriptionName,
+			"ack_id_count", len(req.AckIDs),
+			"ack_deadline_seconds", req.AckDeadlineSeconds,
+			"error", err.Error())
+		if err == ErrSubscriptionNotFound {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		return
+	}
+
+	logger.Info("modified ack deadline",
+		"operation", "modifyAckDeadline",
+		"subscription", subscriptionName,
+		"ack_id_count", len(req.AckIDs),
+		"ack_deadline_seconds", req.AckDeadlineSeconds)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("{}"))
 }

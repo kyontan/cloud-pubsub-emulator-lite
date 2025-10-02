@@ -325,3 +325,138 @@ func TestStorage_MultipleSubscriptions(t *testing.T) {
 		t.Errorf("Expected 1 message in sub2, got %d", len(pulled2))
 	}
 }
+
+func TestStorage_ModifyAckDeadline(t *testing.T) {
+	storage := NewStorage()
+
+	// Setup
+	storage.CreateTopic("projects/test/topics/topic1")
+	storage.CreateSubscription("projects/test/subscriptions/sub1", "projects/test/topics/topic1")
+
+	// Publish and pull messages
+	messages := []PubSubMessage{{Data: "dGVzdA=="}}
+	storage.Publish("projects/test/topics/topic1", messages)
+	pulled, _ := storage.Pull("projects/test/subscriptions/sub1", 10)
+
+	// Modify ack deadline to 0 (make immediately available)
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/sub1", []string{pulled[0].AckID}, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Pull immediately - message should be available
+	pulled2, err := storage.Pull("projects/test/subscriptions/sub1", 10)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(pulled2) != 1 {
+		t.Errorf("Expected 1 message after modifying deadline to 0, got %d", len(pulled2))
+	}
+}
+
+func TestStorage_ModifyAckDeadline_ExtendDeadline(t *testing.T) {
+	storage := NewStorage()
+
+	// Setup
+	storage.CreateTopic("projects/test/topics/topic1")
+	storage.CreateSubscription("projects/test/subscriptions/sub1", "projects/test/topics/topic1")
+
+	// Publish and pull messages
+	messages := []PubSubMessage{{Data: "dGVzdA=="}}
+	storage.Publish("projects/test/topics/topic1", messages)
+	pulled, _ := storage.Pull("projects/test/subscriptions/sub1", 10)
+
+	// Modify ack deadline to 10 seconds
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/sub1", []string{pulled[0].AckID}, 10)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Wait for original deadline to pass (50ms in tests)
+	time.Sleep(100 * time.Millisecond)
+
+	// Pull - message should NOT be available (extended deadline)
+	pulled2, err := storage.Pull("projects/test/subscriptions/sub1", 10)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(pulled2) != 0 {
+		t.Errorf("Expected 0 messages (deadline extended), got %d", len(pulled2))
+	}
+}
+
+func TestStorage_ModifyAckDeadline_SubscriptionNotFound(t *testing.T) {
+	storage := NewStorage()
+
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/nonexistent", []string{"test-ack-id"}, 30)
+	if err != ErrSubscriptionNotFound {
+		t.Errorf("Expected ErrSubscriptionNotFound, got %v", err)
+	}
+}
+
+func TestStorage_ModifyAckDeadline_InvalidAckID(t *testing.T) {
+	storage := NewStorage()
+
+	// Setup
+	storage.CreateTopic("projects/test/topics/topic1")
+	storage.CreateSubscription("projects/test/subscriptions/sub1", "projects/test/topics/topic1")
+
+	// Try to modify with invalid ack ID
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/sub1", []string{"invalid-ack-id"}, 30)
+	if err == nil {
+		t.Error("Expected error for invalid ack ID, got nil")
+	}
+}
+
+func TestStorage_ModifyAckDeadline_MultipleMessages(t *testing.T) {
+	storage := NewStorage()
+
+	// Setup
+	storage.CreateTopic("projects/test/topics/topic1")
+	storage.CreateSubscription("projects/test/subscriptions/sub1", "projects/test/topics/topic1")
+
+	// Publish multiple messages
+	messages := []PubSubMessage{
+		{Data: "dGVzdDE="},
+		{Data: "dGVzdDI="},
+		{Data: "dGVzdDM="},
+	}
+	storage.Publish("projects/test/topics/topic1", messages)
+	pulled, _ := storage.Pull("projects/test/subscriptions/sub1", 10)
+
+	// Modify deadline for first and third message
+	ackIDs := []string{pulled[0].AckID, pulled[2].AckID}
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/sub1", ackIDs, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Pull immediately - should get 2 messages
+	pulled2, err := storage.Pull("projects/test/subscriptions/sub1", 10)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(pulled2) != 2 {
+		t.Errorf("Expected 2 messages (modified deadline), got %d", len(pulled2))
+	}
+}
+
+func TestStorage_ModifyAckDeadline_AfterAcknowledge(t *testing.T) {
+	storage := NewStorage()
+
+	// Setup
+	storage.CreateTopic("projects/test/topics/topic1")
+	storage.CreateSubscription("projects/test/subscriptions/sub1", "projects/test/topics/topic1")
+
+	// Publish, pull, and acknowledge
+	messages := []PubSubMessage{{Data: "dGVzdA=="}}
+	storage.Publish("projects/test/topics/topic1", messages)
+	pulled, _ := storage.Pull("projects/test/subscriptions/sub1", 10)
+	storage.Acknowledge("projects/test/subscriptions/sub1", []string{pulled[0].AckID})
+
+	// Try to modify ack deadline after acknowledge
+	err := storage.ModifyAckDeadline("projects/test/subscriptions/sub1", []string{pulled[0].AckID}, 30)
+	if err == nil {
+		t.Error("Expected error when modifying deadline of acknowledged message, got nil")
+	}
+}

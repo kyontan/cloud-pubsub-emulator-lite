@@ -62,6 +62,12 @@ type AcknowledgeRequest struct {
 	AckIDs []string `json:"ackIds"`
 }
 
+// ModifyAckDeadlineRequest is the request body for modifying ack deadline
+type ModifyAckDeadlineRequest struct {
+	AckIDs             []string `json:"ackIds"`
+	AckDeadlineSeconds int      `json:"ackDeadlineSeconds"`
+}
+
 // ListTopicsResponse is the response for listing topics
 type ListTopicsResponse struct {
 	Topics []Topic `json:"topics"`

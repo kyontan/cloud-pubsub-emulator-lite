@@ -271,3 +271,46 @@ func (s *Storage) Acknowledge(subscriptionName string, ackIDs []string) error {
 	s.messages[subscriptionName] = newMessages
 	return nil
 }
+
+// ModifyAckDeadline modifies the acknowledgement deadline for messages
+func (s *Storage) ModifyAckDeadline(subscriptionName string, ackIDs []string, ackDeadlineSeconds int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.subscriptions[subscriptionName]; !exists {
+		return ErrSubscriptionNotFound
+	}
+
+	msgs, exists := s.messages[subscriptionName]
+	if !exists {
+		return fmt.Errorf("no messages for subscription")
+	}
+
+	ackIDSet := make(map[string]bool)
+	for _, id := range ackIDs {
+		ackIDSet[id] = true
+	}
+
+	now := time.Now()
+	foundCount := 0
+
+	for _, msg := range msgs {
+		msg.mu.Lock()
+		if ackIDSet[msg.AckID] && msg.AckedAt == nil {
+			// If ackDeadlineSeconds is 0, make the message immediately available for redelivery
+			if ackDeadlineSeconds == 0 {
+				msg.DeadlineAt = time.Time{} // Zero time, always in the past
+			} else {
+				msg.DeadlineAt = now.Add(time.Duration(ackDeadlineSeconds) * time.Second)
+			}
+			foundCount++
+		}
+		msg.mu.Unlock()
+	}
+
+	if foundCount == 0 {
+		return fmt.Errorf("no matching messages found for provided ack IDs")
+	}
+
+	return nil
+}
