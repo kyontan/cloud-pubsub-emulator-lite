@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -493,17 +492,4 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
-}
-
-// parsePort extracts port from address string
-func parsePort(addr string) int {
-	parts := strings.Split(addr, ":")
-	if len(parts) < 2 {
-		return 8085
-	}
-	port, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 8085
-	}
-	return port
 }
