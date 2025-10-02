@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -8,10 +9,10 @@ import (
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8085"
-	}
+	// Command-line flags
+	host := flag.String("h", "", "host to listen on (default: all interfaces)")
+	port := flag.String("p", "8085", "port to listen on")
+	flag.Parse()
 
 	server := NewServer()
 
@@ -19,7 +20,7 @@ func main() {
 	mux.HandleFunc("/health", server.handleHealthCheck)
 	mux.Handle("/", server)
 
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf("%s:%s", *host, *port)
 	slog.Info("starting server", "addr", addr)
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
